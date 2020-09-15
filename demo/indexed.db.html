@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Indexed DB</title>
+  <meta name="description" content="Indexed DB Demo">
+  <meta name="keywords" content="Indexed DB">
+  <meta name="author" content="裸奔白菜">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@4.5.0/dist/css/bootstrap.min.css"
+    integrity="sha384-9aIt2nRpC12Uk9gS9baDl411NQApFmC26EwAOH8WgZl5MYYxFfc+NcPb1dKGj7Sk" crossorigin="anonymous">
+  <style>
+    .container {
+      -webkit-user-select: none;
+    }
+
+    .complete-line {
+      text-decoration: line-through solid;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="container" style="width: 500px;">
+    <h3>To-Do List</h3>
+    <div class="clearfix" style="margin-bottom: 1em;">
+      <div class="input-group float-left" style="width: 350px;">
+        <input type="text" class="form-control" id="txt_add_todo" placeholder="add one to-do" aria-label="Add to-do"
+          aria-describedby="btn-add-todo">
+        <div class="input-group-append">
+          <button class="btn btn-outline-secondary" type="button" id="btn-add-todo">Add</button>
+        </div>
+      </div>
+      <button class="btn btn-danger float-right" type="button" id="clear-store">Clear All</button>
+    </div>
+    <ul class="list-group" id="todolist-group"></ul>
+  </div>
+
+  <script>
+    /** 数据格式
+     *  {
+     *    title: '第一件待办事项',
+     *    start: new Date(),
+     *    done: true
+     *  }
+     */
+
+    const
+      DB_NAME = 'to-be.fun.db',
+      DB_VERSION = 1,
+      DB_STORE_NAME = 'toDoList';
+
+    let db = null; // 数据库实例
+
+    function openDb() {
+      console.log("openDb...")
+      let req = indexedDB.open(DB_NAME, DB_VERSION)
+      req.onupgradeneeded = function (evt) {
+        console.log('openDb.onupgradeneeded');
+        let store
+        if (!db.objectStoreNames.contains(DB_STORE_NAME)) // 避免对象仓库重复创建
+          store = db.createObjectStore( // 创建对象仓库
+            DB_STORE_NAME, {
+            keyPath: 'id',      // keyPath作为ObjectStore的搜索关键字
+            autoIncrement: true // keyPath自增
+          })
+
+        // 创建索引：索引、键值、索引是否唯一
+        store.createIndex('title', 'title', { unique: false })
+        store.createIndex('done', 'done', { unique: false })
+        store.createIndex('start time', 'start', { unique: false })
+      }
+
+      // 返回一个Promise对象  确保indexedDB数据库加载完后 再展示DOM列表
+      return new Promise((resolve, reject) => {
+        req.onsuccess = function (evt) {
+          db = this.result;
+          resolve('openDb DONE')
+        }
+        req.onerror = function (evt) {
+          reject(new Error('openDb：' + evt.target.errorCode))
+        }
+      })
+    }
+
+    function getObjectStore(store_name, mode) {
+      let tx = db.transaction(store_name, mode || "readonly")
+      return tx.objectStore(store_name)
+    }
+
+    function clearObjectStore(store_name) {
+      let store = getObjectStore(DB_STORE_NAME, 'readwrite')
+      let req = store.clear()
+      req.onsuccess = function (evt) {
+        console.log('Store cleared')
+      }
+    }
+
+    // 添加项
+    function dbAddItem(obj) {
+      console.log("add arguments：", arguments)
+      let store = getObjectStore(DB_STORE_NAME, 'readwrite')
+      let req = store.add(obj)
+      req.onsuccess = function (evt) {
+        console.log('Insertion in DB successful.')
+      }
+      req.onerror = function (evt) {
+        console.log('error.')
+      }
+    }
+
+    // 删除项
+    function dbDelItem(key) {
+      console.log("delete...")
+      let store = getObjectStore(DB_STORE_NAME, 'readwrite')
+      let req = store.get(key) // 先检查是否存在
+      req.onsuccess = function (event) {
+        let req = store.delete(key)
+        req.onsuccess = function () {
+          showList();
+          console.log("delete successful")
+        }
+      };
+    }
+
+    // 修改项
+    function dbPutItem(key) {
+      var store = getObjectStore(DB_STORE_NAME, 'readwrite')
+      let req = store.get(key)
+      req.onsuccess = function (evt) {
+        let data = evt.target.result
+        data.done = !data.done
+        store.put(data)
+        showList();
+      };
+    }
+
+    function showList() {
+      let store = getObjectStore(DB_STORE_NAME, 'readwrite')
+      let req = store.openCursor();
+
+      let node_todo_group = document.getElementById('todolist-group');
+      node_todo_group.innerHTML = ''
+
+      req.onsuccess = function (evt) {
+        let cursor = evt.target.result
+        if (cursor) {
+          req = store.get(cursor.key)
+          req.onsuccess = function (evt) {
+            let value = evt.target.result
+            let node =
+              `<li class="list-group-item d-flex justify-content-between align-items-center">
+                <div class="custom-control custom-checkbox ${value.done ? 'was-validated' : ""}">
+                  <input type="checkbox" class="custom-control-input" ${value.done ? "checked" : ""}>
+                  <label class="custom-control-label ${value.done ? 'complete-line' : ""}" attr-key="${cursor.key}">【${formatDate(value.start)}】 ${value.title}</label>
+                </div><button type="button" attr-key="${cursor.key}" class="btn btn-outline-danger btn-sm">x</button>
+              </li>`
+            node_todo_group.insertAdjacentHTML('beforeend', node)
+          }
+          // Move on to the next object in store
+          cursor.continue();
+        } else {
+          console.log('No more entries')
+        }
+      }
+    }
+
+    function addEventListeners() {
+      document.getElementById('todolist-group').addEventListener('click', function (e) {
+        // 利用事件委托  如果类型是按钮 就是删除事件  其他类型就是完成/取消完成待办事件
+        let key = parseInt(e.target.getAttribute('attr-key'))
+        if (key) {
+          if (e.target.tagName.toString().toUpperCase() === 'BUTTON') dbDelItem(key)
+          else dbPutItem(key)
+        }
+      })
+
+      document.getElementById('btn-add-todo').addEventListener('click', function () {
+        let title = document.getElementById('txt_add_todo').value;
+        if (title == '') return
+        dbAddItem({
+          title: title,
+          done: false,
+          start: new Date()
+        })
+        showList()
+        document.getElementById('txt_add_todo').value = ''
+      })
+
+      document.getElementById('clear-store').addEventListener('click', function () {
+        clearObjectStore()
+      })
+    }
+
+    function formatDate(date) {
+      var y = date.getFullYear();
+      var m = date.getMonth() + 1;
+      m = m < 10 ? ('0' + m) : m;
+      var d = date.getDate();
+      d = d < 10 ? ('0' + d) : d;
+      var h = date.getHours();
+      h = h < 10 ? ('0' + h) : h;
+      var minute = date.getMinutes();
+      minute = minute < 10 ? ('0' + minute) : minute;
+      return y + '-' + m + '-' + d + ' ' + h + ':' + minute;
+    }
+
+    openDb().then((value) => {  // 利用Promise对象  保证列表渲染前 数据库的相关对象初始化完成
+      showList()
+      console.log(value)
+    }).catch((e) => {
+      console.log(e)
+    }).finally(() => {
+      addEventListeners()
+    })
+  </script>
+</body>
+
+</html>
