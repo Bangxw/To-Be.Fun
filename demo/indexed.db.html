@@ -59,6 +59,7 @@
       req.onupgradeneeded = function (evt) {
         console.log('openDb.onupgradeneeded');
         let store
+        db = this.result;
         if (!db.objectStoreNames.contains(DB_STORE_NAME)) // 避免对象仓库重复创建
           store = db.createObjectStore( // 创建对象仓库
             DB_STORE_NAME, {
